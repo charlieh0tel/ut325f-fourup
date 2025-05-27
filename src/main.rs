@@ -1,6 +1,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
+use anyhow::bail;
 use clap::ArgAction;
 use clap::Parser;
 use clap_derive::Parser;
@@ -15,8 +16,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
+    /// Makes timestamps start at zero.
     #[arg(long, short = 'z')]
     relative_timestamps: bool,
+
+    /// Forces operation with fewer than four meters.
+    #[arg(long, short = 'f')]
+    force: bool,
 
     /// Ports to open.
     #[arg(num_args=1..=4, required = true, action = ArgAction::Set)]
@@ -53,6 +59,10 @@ pub fn system_time_to_unix_seconds(time: SystemTime) -> Result<f64> {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
+    if args.ports.len() != 4 && !args.force {
+        bail!("Four ports not specified.  Use --force/-f to continue.")
+    }
+
     let mut meters: Vec<Meter> = args
         .ports
         .iter()
@@ -82,6 +92,10 @@ async fn main() -> Result<()> {
                     ));
                 }
             }
+        }
+
+        if positional_readings.iter().filter(|v| !v.is_nan()).count() != 4 {
+            bail!("Did not receive four readings.");
         }
 
         let min_timestamp = readings

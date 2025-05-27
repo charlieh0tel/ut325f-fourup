@@ -22,7 +22,7 @@ jobs:
 
       - name: Linkers
         run: |
-          sudo apt-get update && apt-get install -y gcc-mingw-w64 g++-aarch64-linux-gnu
+          sudo sh -c 'apt-get update && apt-get install -y gcc-mingw-w64 g++-aarch64-linux-gnu'
 
       - name: Cargo linker config
         run: |
@@ -51,15 +51,15 @@ jobs:
             target/*/release/ut325f-fourup
             target/*/release/ut325f-fourup.exe
 
-      - name: Prepare Release
+      - name: Prepare release
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           mkdir release
-          cp -p target/x86_64-pc-windows-gnu/release/ut325f-fourup release/ut325f-fourup-x86_64-pc-windows-gnu
-          cp -p target/aarch64-unknown-linux-gnu/release/ut325f-fourup release/ut325f-fourup-aarch64-unknown-linux-gnu
-          cp -p target/x86_64-pc-windows-gnu/release/ut325f-fourup.exe release/ut325f-fourup-x86_64-pc-windows-gnu.exe
+          cp -p target/x86_64-unknown-linux-gnu/release/ut325f-fourup release/ut325f-fourup-${GITHUB_REF_NAME}-x86_64-pc-windows-gnu
+          cp -p target/aarch64-unknown-linux-gnu/release/ut325f-fourup release/ut325f-fourup-${GITHUB_REF_NAME}-aarch64-unknown-linux-gnu
+          cp -p target/x86_64-pc-windows-gnu/release/ut325f-fourup.exe release/ut325f-fourup-${GITHUB_REF_NAME}-x86_64-pc-windows-gnu.exe
 
-      - name: Debug
+      - name: List release files
         if: startsWith(github.ref, 'refs/tags/')
         run: ls -R release
 

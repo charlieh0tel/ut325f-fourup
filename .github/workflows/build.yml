@@ -1,0 +1,70 @@
+---
+name: Make Prebuilts
+
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust target x86_64-unknown-linux-gnu
+        run: rustup target add x86_64-unknown-linux-gnu
+
+      - name: Rust target aarch64-unknown-linux-gnu
+        run: rustup target add aarch64-unknown-linux-gnu
+
+      - name: Rust target x86_64-pc-windows-gnu
+        run: rustup target add x86_64-pc-windows-gnu
+
+      - name: Linkers
+        run: |
+          sudo apt-get update && apt-get install -y gcc-mingw-w64 g++-aarch64-linux-gnu
+
+      - name: Cargo linker config
+        run: |
+          cat >${HOME}/.cargo/config.toml <<EOF
+          [target.x86_64-pc-windows-gnu]
+          linker = "/usr/bin/x86_64-w64-mingw32-gcc"
+
+          [target.aarch64-unknown-linux-gnu]
+          linker = "/usr/bin/aarch64-linux-gnu-gcc"
+          EOF
+
+      - name: Build x86_64-unknown-linux-gnu
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+
+      - name: Build aarch64-unknown-linux-gnu
+        run: cargo build --release --target aarch64-unknown-linux-gnu
+
+      - name: Build x86_64-pc-windows-gnu
+        run: cargo build --release --target x86_64-pc-windows-gnu
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ut325f-fourup
+          path: |
+            target/*/release/ut325f-fourup
+            target/*/release/ut325f-fourup.exe
+
+      - name: Prepare Release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          mkdir release
+          cp -p target/x86_64-pc-windows-gnu/release/ut325f-fourup release/ut325f-fourup-x86_64-pc-windows-gnu
+          cp -p target/aarch64-unknown-linux-gnu/release/ut325f-fourup release/ut325f-fourup-aarch64-unknown-linux-gnu
+          cp -p target/x86_64-pc-windows-gnu/release/ut325f-fourup.exe release/ut325f-fourup-x86_64-pc-windows-gnu.exe
+
+      - name: Debug
+        if: startsWith(github.ref, 'refs/tags/')
+        run: ls -R release
+
+      - name: Upload release
+        uses: ncipollo/release-action@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          artifacts: release/*

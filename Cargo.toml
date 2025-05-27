@@ -1,0 +1,12 @@
+[package]
+name = "ut325f-fourup"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.98"
+clap = "4.5.38"
+clap_derive = "4.5.32"
+futures = "0.3.31"
+tokio = "1.45.1"
+ut325f-rs = "0.9.1"

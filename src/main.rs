@@ -20,12 +20,8 @@ struct Args {
     #[arg(long, short = 'z')]
     relative_timestamps: bool,
 
-    /// Forces operation with fewer than four meters.
-    #[arg(long, short = 'f')]
-    force: bool,
-
     /// Ports to open.
-    #[arg(num_args=1..=4, required = true, action = ArgAction::Set)]
+    #[arg(num_args=4, required = true, action = ArgAction::Set)]
     ports: Vec<String>,
 }
 
@@ -59,8 +55,8 @@ pub fn system_time_to_unix_seconds(time: SystemTime) -> Result<f64> {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    if args.ports.len() != 4 && !args.force {
-        bail!("Four ports not specified.  Use --force/-f to continue.")
+    if args.ports.len() != 4 {
+        bail!("Four ports not specified.");
     }
 
     let mut meters: Vec<Meter> = args

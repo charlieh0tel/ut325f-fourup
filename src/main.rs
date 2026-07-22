@@ -8,6 +8,7 @@ use clap_derive::Parser;
 
 use ut325f_rs::Meter;
 use ut325f_rs::Reading;
+use ut325f_rs::SerialTransport;
 
 use std::time::Duration;
 
@@ -21,7 +22,7 @@ struct Args {
     relative_timestamps: bool,
 
     /// Ports to open.
-    #[arg(num_args=4, required = true, action = ArgAction::Set)]
+    #[arg(num_args=4, required = true, action = ArgAction::Set, value_name = "PORT")]
     ports: Vec<String>,
 }
 
@@ -36,8 +37,10 @@ fn find_unique_non_nan_value_and_position(arr: [f32; 4]) -> Option<(f32, usize)>
     }
 }
 
-fn collect_readings(maybe_readings: Vec<Result<Reading, anyhow::Error>>) -> Result<Vec<Reading>> {
-    maybe_readings.into_iter().collect()
+fn collect_readings(maybe_readings: Vec<ut325f_rs::Result<Reading>>) -> Result<Vec<Reading>> {
+    Ok(maybe_readings
+        .into_iter()
+        .collect::<ut325f_rs::Result<_>>()?)
 }
 
 pub fn system_time_to_unix_seconds(time: SystemTime) -> Result<f64> {
@@ -59,13 +62,10 @@ async fn main() -> Result<()> {
         bail!("Four ports not specified.");
     }
 
-    let mut meters: Vec<Meter> = args
-        .ports
-        .iter()
-        .map(|port| Meter::new(port.to_string()))
-        .collect();
-
-    futures::future::join_all(meters.iter_mut().map(|meter| meter.open())).await;
+    let maybe_meters =
+        futures::future::join_all(args.ports.iter().map(|port| Meter::open_serial(port))).await;
+    let mut meters: Vec<Meter<SerialTransport>> =
+        maybe_meters.into_iter().collect::<ut325f_rs::Result<_>>()?;
 
     let mut unix_time_offset: f64 = 0.;
 

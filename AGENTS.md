@@ -1,4 +1,4 @@
-# Agent Instructions for ut325f-rs
+# Agent Instructions for ut325f-fourup
 
 - Always run `cargo fmt` after changes and before commits.
 - Always run `cargo clippy` after major changes and always before commits.

@@ -183,6 +183,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d91e0c145792ef73a6ad36d27c75ac09f1832222a3c209689d90f534685ee5b7"
 dependencies = [
  "clap_builder",
+ "clap_derive",
 ]
 
 [[package]]
@@ -973,7 +974,6 @@ version = "1.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "clap_derive",
  "futures",
  "tokio",
  "ut325f-rs",

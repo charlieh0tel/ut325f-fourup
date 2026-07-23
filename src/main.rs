@@ -4,7 +4,6 @@ use anyhow::anyhow;
 use anyhow::bail;
 use clap::ArgAction;
 use clap::Parser;
-use clap_derive::Parser;
 
 use ut325f_rs::BleTransport;
 use ut325f_rs::Meter;

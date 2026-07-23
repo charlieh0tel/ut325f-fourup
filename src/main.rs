@@ -53,12 +53,6 @@ fn find_unique_non_nan_value_and_position(arr: [f32; 4]) -> Option<(f32, usize)>
     }
 }
 
-fn collect_readings(maybe_readings: Vec<ut325f_rs::Result<Reading>>) -> Result<Vec<Reading>> {
-    Ok(maybe_readings
-        .into_iter()
-        .collect::<ut325f_rs::Result<_>>()?)
-}
-
 /// Writes a line to `writer`; returns Ok(false) when the consumer has
 /// gone away (e.g. piped to head), which ends output cleanly.
 fn write_line(writer: &mut impl Write, line: std::fmt::Arguments) -> Result<bool> {
@@ -134,14 +128,38 @@ async fn read_latest<T: Transport>(meter: &mut Meter<T>) -> ut325f_rs::Result<Re
 const MAX_TIMESTAMP_SKEW: Duration = Duration::from_secs(1);
 const MAX_CONSECUTIVE_SKEWED_ROWS: u32 = 5;
 
-async fn run<T: Transport>(mut meters: Vec<Meter<T>>, relative_timestamps: bool) -> Result<()> {
+/// Opens one meter per source (in parallel), pairing each with its
+/// source so later errors can say which meter failed.
+async fn open_all<T, F, Fut>(sources: &[String], open: F) -> Result<Vec<(String, Meter<T>)>>
+where
+    T: Transport,
+    F: Fn(String) -> Fut,
+    Fut: Future<Output = ut325f_rs::Result<Meter<T>>>,
+{
+    let maybe_meters =
+        futures::future::join_all(sources.iter().map(|source| open(source.clone()))).await;
+    sources
+        .iter()
+        .zip(maybe_meters)
+        .map(|(source, meter)| Ok((source.clone(), meter.with_context(|| source.clone())?)))
+        .collect()
+}
+
+async fn run<T: Transport>(
+    mut meters: Vec<(String, Meter<T>)>,
+    relative_timestamps: bool,
+) -> Result<()> {
     let mut unix_time_offset: f64 = 0.;
     let mut consecutive_skewed_rows: u32 = 0;
     let mut stdout = std::io::stdout().lock();
 
     loop {
-        let maybe_readings = futures::future::join_all(meters.iter_mut().map(read_latest)).await;
-        let readings = collect_readings(maybe_readings)?;
+        let maybe_readings =
+            futures::future::join_all(meters.iter_mut().map(|(source, meter)| async move {
+                read_latest(meter).await.with_context(|| source.clone())
+            }))
+            .await;
+        let readings: Vec<Reading> = maybe_readings.into_iter().collect::<Result<_>>()?;
         let mut positional_readings = [f32::NAN; 4];
 
         for reading in &readings {
@@ -225,20 +243,19 @@ async fn main() -> Result<()> {
             4 => args.ports.clone(),
             n => bail!("--ble takes four addresses or none to discover, got {n}."),
         };
-        let maybe_meters =
-            futures::future::join_all(addresses.iter().map(|address| Meter::open_ble(address)))
-                .await;
-        let meters: Vec<Meter<BleTransport>> =
-            maybe_meters.into_iter().collect::<ut325f_rs::Result<_>>()?;
+        let meters = open_all(&addresses, async |address: String| {
+            Meter::open_ble(&address).await
+        })
+        .await?;
         return run(meters, args.relative_timestamps).await;
     }
 
     if args.ports.len() != 4 {
         bail!("Four ports not specified.");
     }
-    let maybe_meters =
-        futures::future::join_all(args.ports.iter().map(|port| Meter::open_serial(port))).await;
-    let meters: Vec<Meter<ut325f_rs::SerialTransport>> =
-        maybe_meters.into_iter().collect::<ut325f_rs::Result<_>>()?;
+    let meters = open_all(&args.ports, async |port: String| {
+        Meter::open_serial(&port).await
+    })
+    .await?;
     run(meters, args.relative_timestamps).await
 }

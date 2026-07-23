@@ -114,8 +114,12 @@ async fn read_latest<T: Transport>(meter: &mut Meter<T>) -> ut325f_rs::Result<Re
     Ok(reading)
 }
 
+const MAX_TIMESTAMP_SKEW: Duration = Duration::from_secs(1);
+const MAX_CONSECUTIVE_SKEWED_ROWS: u32 = 5;
+
 async fn run<T: Transport>(mut meters: Vec<Meter<T>>, relative_timestamps: bool) -> Result<()> {
     let mut unix_time_offset: f64 = 0.;
+    let mut consecutive_skewed_rows: u32 = 0;
 
     loop {
         let maybe_readings = futures::future::join_all(meters.iter_mut().map(read_latest)).await;
@@ -151,7 +155,17 @@ async fn run<T: Transport>(mut meters: Vec<Meter<T>>, relative_timestamps: bool)
             .map(|r| r.timestamp)
             .max()
             .with_context(|| "no max timestamp??")?;
-        assert!(max_timestamp.duration_since(min_timestamp)? < Duration::from_secs(1));
+        let skew = max_timestamp.duration_since(min_timestamp)?;
+        if skew >= MAX_TIMESTAMP_SKEW {
+            consecutive_skewed_rows += 1;
+            if consecutive_skewed_rows >= MAX_CONSECUTIVE_SKEWED_ROWS {
+                bail!(
+                    "Readings misaligned by {skew:?} for {consecutive_skewed_rows} consecutive rows."
+                );
+            }
+            continue;
+        }
+        consecutive_skewed_rows = 0;
 
         let timestamp = min_timestamp;
         if relative_timestamps && unix_time_offset == 0. {

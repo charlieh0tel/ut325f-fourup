@@ -281,3 +281,101 @@ async fn main() -> Result<()> {
     .await?;
     run(meters, args.relative_timestamps).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ut325f_rs::HoldType;
+
+    const N: f32 = f32::NAN;
+
+    fn readings(temps: &[[f32; 4]]) -> Vec<(String, Reading)> {
+        temps
+            .iter()
+            .enumerate()
+            .map(|(i, &current_temps_c)| {
+                (
+                    format!("meter{}", i + 1),
+                    Reading {
+                        timestamp: SystemTime::now(),
+                        current_temps_c,
+                        held_temps_c: [N; 4],
+                        hold_type: HoldType::Current,
+                        meter_temp_c: 25.0,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_assemble_positions_any_order() {
+        let positional = assemble_positions(&readings(&[
+            [N, N, 3.0, N],
+            [1.0, N, N, N],
+            [N, N, N, 4.0],
+            [N, 2.0, N, N],
+        ]))
+        .unwrap();
+        assert_eq!(positional, [1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_assemble_positions_duplicate_names_both_meters() {
+        let err = assemble_positions(&readings(&[[1.0, N, N, N], [10.0, N, N, N]]))
+            .unwrap_err()
+            .to_string();
+        assert_eq!(err, "Meters meter1 and meter2 both report position 1.");
+    }
+
+    #[test]
+    fn test_assemble_positions_no_active_input() {
+        let err = assemble_positions(&readings(&[[N, N, N, N]]))
+            .unwrap_err()
+            .to_string();
+        assert_eq!(err, "Meter meter1: no active input.");
+    }
+
+    #[test]
+    fn test_assemble_positions_multiple_active_inputs() {
+        let err = assemble_positions(&readings(&[[1.0, N, 3.0, N]]))
+            .unwrap_err()
+            .to_string();
+        assert_eq!(err, "Meter meter1: 2 active inputs, expected exactly one.");
+    }
+
+    #[test]
+    fn test_assemble_positions_missing_position() {
+        let err = assemble_positions(&readings(&[[1.0, N, N, N], [N, 2.0, N, N], [N, N, N, 4.0]]))
+            .unwrap_err()
+            .to_string();
+        assert_eq!(err, "No meter reported position 3.");
+    }
+
+    #[test]
+    fn test_system_time_to_unix_seconds() {
+        let time = UNIX_EPOCH + Duration::new(1_000, 250_000_000);
+        assert_eq!(system_time_to_unix_seconds(time).unwrap(), 1000.25);
+        assert!(system_time_to_unix_seconds(UNIX_EPOCH - Duration::from_secs(1)).is_err());
+    }
+
+    struct BrokenPipeWriter;
+
+    impl Write for BrokenPipeWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_write_line() {
+        let mut buf = Vec::new();
+        assert!(write_line(&mut buf, format_args!("row")).unwrap());
+        assert_eq!(buf, b"row\n");
+        assert!(!write_line(&mut BrokenPipeWriter, format_args!("row")).unwrap());
+    }
+}

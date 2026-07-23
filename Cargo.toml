@@ -3,10 +3,21 @@ name = "ut325f-fourup"
 version = "1.2.0"
 edition = "2024"
 
+[features]
+default = ["serial", "ble", "cli"]
+serial = ["ut325f-rs/serial"]
+ble = ["ut325f-rs/btleplug"]
+cli = ["dep:anyhow", "dep:clap", "serial", "ble"]
+
 [dependencies]
-anyhow = "1.0.104"
-clap = { version = "4.6.4", features = ["derive"] }
+anyhow = { version = "1.0.104", optional = true }
+clap = { version = "4.6.4", features = ["derive"], optional = true }
 futures = "0.3.33"
 thiserror = "2"
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "time"] }
-ut325f-rs = { version = "1.0.0", features = ["btleplug"] }
+ut325f-rs = { version = "1.0.0", default-features = false }
+
+[[bin]]
+name = "ut325f-fourup"
+path = "src/main.rs"
+required-features = ["cli"]

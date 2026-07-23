@@ -15,7 +15,11 @@
 use std::time::Duration;
 use std::time::SystemTime;
 
-pub use ut325f_rs::{BleTransport, DiscoveredMeter, Meter, Reading, SerialTransport, Transport};
+#[cfg(feature = "serial")]
+pub use ut325f_rs::SerialTransport;
+#[cfg(feature = "ble")]
+pub use ut325f_rs::{BleTransport, DiscoveredMeter};
+pub use ut325f_rs::{Meter, Reading, Transport};
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -55,6 +59,7 @@ pub enum Error {
     MissingPosition { position: usize },
     #[error("Readings misaligned by {skew:?} for {rows} consecutive rows.")]
     Misaligned { skew: Duration, rows: u32 },
+    #[cfg(feature = "ble")]
     #[error("Expected to see exactly four meters, saw {}:{}", seen.len(), format_seen(seen))]
     DiscoverCount { seen: Vec<DiscoveredMeter> },
     #[error(transparent)]
@@ -91,6 +96,7 @@ fn collect_all<T>(results: Vec<Result<T>>) -> Result<Vec<T>> {
     }
 }
 
+#[cfg(feature = "ble")]
 fn format_seen(seen: &[DiscoveredMeter]) -> String {
     seen.iter()
         .map(|m| format!("\n  {}  {}", m.address, m.name))
@@ -162,6 +168,7 @@ pub struct FourUp<T: Transport> {
     consecutive_skewed_rows: u32,
 }
 
+#[cfg(feature = "serial")]
 impl FourUp<SerialTransport> {
     /// Opens four meters on USB serial ports (e.g. "/dev/ttyUSB0").
     pub async fn open_serial(ports: &[String], config: Config) -> Result<Self> {
@@ -175,6 +182,7 @@ impl FourUp<SerialTransport> {
     }
 }
 
+#[cfg(feature = "ble")]
 impl FourUp<BleTransport> {
     /// Opens four meters by Bluetooth address (e.g. "E8:26:CF:F1:23:61").
     pub async fn open_ble(addresses: &[String], config: Config) -> Result<Self> {
@@ -469,10 +477,12 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "serial")]
     async fn no_open(_: String) -> ut325f_rs::Result<Meter<SerialTransport>> {
         unreachable!("open must not be called for an invalid config");
     }
 
+    #[cfg(feature = "serial")]
     #[tokio::test]
     async fn test_open_rejects_invalid_config() {
         for (bad, reason) in [

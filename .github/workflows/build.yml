@@ -22,6 +22,8 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
+      - run: cargo check --lib --locked --no-default-features --features serial
+      - run: cargo check --lib --locked --no-default-features --features ble
 
   build-release:
     needs: check

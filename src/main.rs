@@ -121,10 +121,17 @@ async fn discover(scan_time: Duration) -> Result<()> {
 }
 
 async fn discover_four(scan_time: Duration) -> Result<Vec<String>> {
-    let meters = BleTransport::discover(scan_time).await?;
+    // Meters without an RSSI are only known from the Bluetooth stack's
+    // cache (e.g. paired but powered off); a stale entry must not
+    // break the exactly-four requirement.
+    let meters: Vec<_> = BleTransport::discover(scan_time)
+        .await?
+        .into_iter()
+        .filter(|m| m.rssi.is_some())
+        .collect();
     if meters.len() != 4 {
         bail!(
-            "Expected to discover exactly four meters, found {}:{}",
+            "Expected to see exactly four meters, saw {}:{}",
             meters.len(),
             meters
                 .iter()

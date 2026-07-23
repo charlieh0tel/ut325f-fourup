@@ -80,6 +80,20 @@ fn assemble_positions(readings: &[(String, Reading)]) -> Result<[f32; 4]> {
     Ok(positional)
 }
 
+/// Rejects repeated sources before any is opened; Bluetooth addresses
+/// compare case-insensitively.
+fn check_distinct(kind: &str, sources: &[String], ignore_ascii_case: bool) -> Result<()> {
+    for (i, a) in sources.iter().enumerate() {
+        if sources[i + 1..]
+            .iter()
+            .any(|b| a == b || (ignore_ascii_case && a.eq_ignore_ascii_case(b)))
+        {
+            bail!("Duplicate {kind}: {a}.");
+        }
+    }
+    Ok(())
+}
+
 /// Writes a line to `writer`; returns Ok(false) when the consumer has
 /// gone away (e.g. piped to head), which ends output cleanly.
 fn write_line(writer: &mut impl Write, line: std::fmt::Arguments) -> Result<bool> {
@@ -268,6 +282,7 @@ async fn main() -> Result<()> {
             4 => args.ports.clone(),
             n => bail!("--ble takes four addresses or none to discover, got {n}."),
         };
+        check_distinct("address", &addresses, true)?;
         let meters = open_all(&addresses, async |address: String| {
             Meter::open_ble(&address).await
         })
@@ -278,6 +293,7 @@ async fn main() -> Result<()> {
     if args.ports.len() != 4 {
         bail!("Four ports not specified.");
     }
+    check_distinct("port", &args.ports, false)?;
     let meters = open_all(&args.ports, async |port: String| {
         Meter::open_serial(&port).await
     })
@@ -353,6 +369,20 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert_eq!(err, "No meter reported position 3.");
+    }
+
+    #[test]
+    fn test_check_distinct() {
+        let sources = [
+            "/dev/a".to_owned(),
+            "/dev/A".to_owned(),
+            "/dev/b".to_owned(),
+        ];
+        assert!(check_distinct("port", &sources, false).is_ok());
+        let err = check_distinct("address", &sources, true)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(err, "Duplicate address: /dev/a.");
     }
 
     #[test]

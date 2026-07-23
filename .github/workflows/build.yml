@@ -24,6 +24,7 @@ jobs:
       - run: cargo test --locked
 
   build-release:
+    needs: check
     permissions:
       contents: write
     uses: charlieh0tel/deb-workflows/.github/workflows/rust-build-exes.yml@main

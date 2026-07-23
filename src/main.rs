@@ -6,9 +6,10 @@ use clap::ArgAction;
 use clap::Parser;
 use clap_derive::Parser;
 
+use ut325f_rs::BleTransport;
 use ut325f_rs::Meter;
 use ut325f_rs::Reading;
-use ut325f_rs::SerialTransport;
+use ut325f_rs::Transport;
 
 use std::time::Duration;
 
@@ -21,8 +22,22 @@ struct Args {
     #[arg(long, short = 'z')]
     relative_timestamps: bool,
 
-    /// Ports to open.
-    #[arg(num_args=4, required = true, action = ArgAction::Set, value_name = "PORT")]
+    /// Use Bluetooth LE: give four addresses (e.g. E8:26:CF:F1:23:61),
+    /// or none to discover exactly four meters.
+    #[arg(long, short = 'b', conflicts_with = "discover")]
+    ble: bool,
+
+    /// Discover meters over Bluetooth LE, print them, and exit.
+    #[arg(long, short = 'd')]
+    discover: bool,
+
+    /// Bluetooth scan duration in seconds, for --discover and --ble
+    /// without addresses.
+    #[arg(long, default_value_t = 8, value_name = "SECONDS")]
+    scan_time: u64,
+
+    /// Serial ports to open or, with --ble, meter Bluetooth addresses.
+    #[arg(num_args = 0..=4, action = ArgAction::Set, value_name = "PORT|ADDR")]
     ports: Vec<String>,
 }
 
@@ -54,19 +69,36 @@ pub fn system_time_to_unix_seconds(time: SystemTime) -> Result<f64> {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
-
-    if args.ports.len() != 4 {
-        bail!("Four ports not specified.");
+async fn discover(scan_time: Duration) -> Result<()> {
+    let meters = BleTransport::discover(scan_time).await?;
+    if meters.is_empty() {
+        eprintln!("No meters found.");
     }
+    for meter in &meters {
+        let rssi = meter
+            .rssi
+            .map_or_else(|| "cached".to_owned(), |rssi| format!("{rssi} dBm"));
+        println!("{}  {}  [{}]", meter.address, meter.name, rssi);
+    }
+    Ok(())
+}
 
-    let maybe_meters =
-        futures::future::join_all(args.ports.iter().map(|port| Meter::open_serial(port))).await;
-    let mut meters: Vec<Meter<SerialTransport>> =
-        maybe_meters.into_iter().collect::<ut325f_rs::Result<_>>()?;
+async fn discover_four(scan_time: Duration) -> Result<Vec<String>> {
+    let meters = BleTransport::discover(scan_time).await?;
+    if meters.len() != 4 {
+        bail!(
+            "Expected to discover exactly four meters, found {}:{}",
+            meters.len(),
+            meters
+                .iter()
+                .map(|m| format!("\n  {}  {}", m.address, m.name))
+                .collect::<String>()
+        );
+    }
+    Ok(meters.into_iter().map(|m| m.address).collect())
+}
 
+async fn run<T: Transport>(mut meters: Vec<Meter<T>>, relative_timestamps: bool) -> Result<()> {
     let mut unix_time_offset: f64 = 0.;
 
     loop {
@@ -83,7 +115,7 @@ async fn main() -> Result<()> {
                     positional_readings[index] = value
                 } else {
                     return Err(anyhow!(
-                        "Multiple meters returned a valuein the same position {}",
+                        "Multiple meters returned a value in the same position {}",
                         index + 1
                     ));
                 }
@@ -107,7 +139,7 @@ async fn main() -> Result<()> {
         assert!(max_timestamp.duration_since(min_timestamp)? < Duration::from_secs(1));
 
         let timestamp = min_timestamp;
-        if args.relative_timestamps && unix_time_offset == 0. {
+        if relative_timestamps && unix_time_offset == 0. {
             unix_time_offset = system_time_to_unix_seconds(timestamp)?;
         }
 
@@ -121,4 +153,40 @@ async fn main() -> Result<()> {
             positional_readings[3]
         );
     }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+    let scan_time = Duration::from_secs(args.scan_time);
+
+    if args.discover {
+        if !args.ports.is_empty() {
+            bail!("--discover takes no ports or addresses.");
+        }
+        return discover(scan_time).await;
+    }
+
+    if args.ble {
+        let addresses = match args.ports.len() {
+            0 => discover_four(scan_time).await?,
+            4 => args.ports.clone(),
+            n => bail!("--ble takes four addresses or none to discover, got {n}."),
+        };
+        let maybe_meters =
+            futures::future::join_all(addresses.iter().map(|address| Meter::open_ble(address)))
+                .await;
+        let meters: Vec<Meter<BleTransport>> =
+            maybe_meters.into_iter().collect::<ut325f_rs::Result<_>>()?;
+        return run(meters, args.relative_timestamps).await;
+    }
+
+    if args.ports.len() != 4 {
+        bail!("Four ports not specified.");
+    }
+    let maybe_meters =
+        futures::future::join_all(args.ports.iter().map(|port| Meter::open_serial(port))).await;
+    let meters: Vec<Meter<ut325f_rs::SerialTransport>> =
+        maybe_meters.into_iter().collect::<ut325f_rs::Result<_>>()?;
+    run(meters, args.relative_timestamps).await
 }

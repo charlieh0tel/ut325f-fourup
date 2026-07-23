@@ -220,10 +220,15 @@ impl FourUp<BleTransport> {
 }
 
 impl<T: Transport> FourUp<T> {
-    /// Opens one meter per source (in parallel) on any transport,
-    /// pairing each with its source so errors can say which meter
-    /// failed. The convenience constructors use this; call it directly
-    /// for custom transports.
+    /// Opens one meter per source on any transport, pairing each with
+    /// its source so errors can say which meter failed. The convenience
+    /// constructors use this; call it directly for custom transports.
+    ///
+    /// Meters are opened one at a time: concurrent LE connection
+    /// attempts abort each other in BlueZ
+    /// (le-connection-abort-by-local). On failure, meters already
+    /// opened are closed before the error returns, so nothing stays
+    /// connected.
     ///
     /// A custom transport's `recv` must be cancellation-safe (no data
     /// consumed by a future dropped before completion, as with the
@@ -236,21 +241,21 @@ impl<T: Transport> FourUp<T> {
     {
         config.validate()?;
         check_sources("source", sources, false)?;
-        let maybe_meters =
-            futures::future::join_all(sources.iter().map(|source| open(source.clone()))).await;
-        let meters = collect_all(
-            sources
-                .iter()
-                .zip(maybe_meters)
-                .map(|(source_id, meter)| match meter {
-                    Ok(meter) => Ok((source_id.clone(), meter)),
-                    Err(cause) => Err(Error::Open {
+        let mut meters: Vec<(String, Meter<T>)> = Vec::with_capacity(sources.len());
+        for source_id in sources {
+            match open(source_id.clone()).await {
+                Ok(meter) => meters.push((source_id.clone(), meter)),
+                Err(cause) => {
+                    for (_, meter) in meters {
+                        let _ = meter.close().await;
+                    }
+                    return Err(Error::Open {
                         source_id: source_id.clone(),
                         cause,
-                    }),
-                })
-                .collect(),
-        )?;
+                    });
+                }
+            }
+        }
         Ok(Self {
             meters,
             config,

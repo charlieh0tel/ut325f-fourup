@@ -1,6 +1,6 @@
 [package]
 name = "ut325f-fourup"
-version = "1.2.0"
+version = "1.3.0"
 edition = "2024"
 description = "Reads four Uni-T UT325F thermocouple meters in lockstep"
 license = "BSD-3-Clause"

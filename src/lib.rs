@@ -231,7 +231,6 @@ impl<T: Transport> FourUp<T> {
             .await;
             let readings: Vec<(String, Reading)> =
                 maybe_readings.into_iter().collect::<Result<_>>()?;
-            let temps_c = assemble_positions(&readings)?;
 
             let timestamps = || readings.iter().map(|(_, r)| r.timestamp);
             let min_timestamp = timestamps().min().expect("four readings");
@@ -253,7 +252,7 @@ impl<T: Transport> FourUp<T> {
 
             return Ok(Row {
                 timestamp: min_timestamp,
-                temps_c,
+                temps_c: assemble_positions(&readings)?,
             });
         }
     }

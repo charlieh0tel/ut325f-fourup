@@ -975,6 +975,7 @@ dependencies = [
  "anyhow",
  "clap",
  "futures",
+ "thiserror 2.0.19",
  "tokio",
  "ut325f-rs",
 ]

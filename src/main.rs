@@ -85,6 +85,14 @@ async fn discover(scan_time: Duration) -> Result<()> {
 }
 
 async fn run<T: Transport>(mut fourup: FourUp<T>, relative_timestamps: bool) -> Result<()> {
+    let result = read_rows(&mut fourup, relative_timestamps).await;
+    let closed = fourup.close().await;
+    // A read error is the story; a close failure matters only on an
+    // otherwise clean exit.
+    result.and(closed.map_err(Into::into))
+}
+
+async fn read_rows<T: Transport>(fourup: &mut FourUp<T>, relative_timestamps: bool) -> Result<()> {
     let mut relative_start: Option<Instant> = None;
     let mut stdout = std::io::stdout().lock();
 

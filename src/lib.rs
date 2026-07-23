@@ -45,6 +45,12 @@ pub enum Error {
         #[source]
         cause: ut325f_rs::Error,
     },
+    #[error("{source_id}: {cause}")]
+    Close {
+        source_id: String,
+        #[source]
+        cause: ut325f_rs::Error,
+    },
     #[error("Meter {source_id}: no active input.")]
     NoActiveInput { source_id: String },
     #[error("Meter {source_id}: {count} active inputs, expected exactly one.")]
@@ -301,6 +307,23 @@ impl<T: Transport> FourUp<T> {
                 temps_c: assemble_positions(&readings)?,
             });
         }
+    }
+
+    /// Gracefully shuts down all four meters (e.g. disconnecting BLE
+    /// devices this session connected). Prefer this over dropping at
+    /// the end of a session: cleanup spawned from drop does not
+    /// survive runtime shutdown at process exit.
+    pub async fn close(self) -> Result<()> {
+        let results = futures::future::join_all(self.meters.into_iter().map(
+            |(source_id, meter)| async move {
+                meter
+                    .close()
+                    .await
+                    .map_err(|cause| Error::Close { source_id, cause })
+            },
+        ))
+        .await;
+        collect_all(results).map(|_| ())
     }
 }
 

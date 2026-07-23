@@ -182,6 +182,11 @@ impl<T: Transport> FourUp<T> {
     /// pairing each with its source so errors can say which meter
     /// failed. The convenience constructors use this; call it directly
     /// for custom transports.
+    ///
+    /// A custom transport's `recv` must be cancellation-safe (no data
+    /// consumed by a future dropped before completion, as with the
+    /// serial and BLE transports): draining races `recv` against a
+    /// timeout and drops the loser.
     pub async fn open_with<F, Fut>(sources: &[String], open: F, config: Config) -> Result<Self>
     where
         F: Fn(String) -> Fut,
@@ -216,6 +221,11 @@ impl<T: Transport> FourUp<T> {
     /// mapped to columns by input position. Misaligned sets are
     /// discarded and re-read, up to
     /// [`Config::max_consecutive_skewed_rows`].
+    ///
+    /// Not cancellation-safe: dropping this future mid-flight (e.g.
+    /// racing it in `select!` or under an outer timeout) leaves the
+    /// meters at uneven stream positions; the next call's drain
+    /// usually recovers, but readings in flight are lost.
     pub async fn read_row(&mut self) -> Result<Row> {
         let config = self.config;
         loop {

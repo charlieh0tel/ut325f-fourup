@@ -238,9 +238,9 @@ impl<T: Transport> FourUp<T> {
             let skew = max_timestamp
                 .duration_since(min_timestamp)
                 .unwrap_or_default();
-            if skew >= self.config.max_skew {
+            if skew > self.config.max_skew {
                 self.consecutive_skewed_rows += 1;
-                if self.consecutive_skewed_rows >= self.config.max_consecutive_skewed_rows {
+                if self.consecutive_skewed_rows > self.config.max_consecutive_skewed_rows {
                     return Err(Error::Misaligned {
                         skew,
                         rows: self.consecutive_skewed_rows,

@@ -461,6 +461,173 @@ mod tests {
         assert_eq!(err, "No meter reported position 3.");
     }
 
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
+    /// A frame with the given current temps (NaN = inactive input),
+    /// held temps all inactive, hold type Current.
+    fn frame(temps: [f32; 4]) -> Vec<u8> {
+        let mut buf = vec![0u8; Reading::N_BYTES];
+        buf[..Reading::N_SYNC_BYTES].copy_from_slice(&Reading::SYNC);
+        let mut off = Reading::N_SYNC_BYTES;
+        for t in temps {
+            let value = if t.is_nan() { 0.0 } else { t };
+            buf[off..off + 4].copy_from_slice(&value.to_le_bytes());
+            off += 4;
+        }
+        for t in temps {
+            buf[off] = u8::from(t.is_nan());
+            off += 1;
+        }
+        for i in 0..4 {
+            buf[25 + 16 + i] = 1;
+        }
+        let sum = buf[..Reading::N_BYTES - 2]
+            .iter()
+            .fold(0u16, |s, &b| s.wrapping_add(u16::from(b)));
+        buf[Reading::N_BYTES - 2..].copy_from_slice(&sum.to_be_bytes());
+        buf
+    }
+
+    /// Yields each scripted chunk after its delay, then pends forever.
+    /// Cancellation-safe: an entry is consumed only once its delay has
+    /// fully elapsed within a single `recv` call.
+    struct ScriptedTransport {
+        script: VecDeque<(Duration, ut325f_rs::Result<Vec<u8>>)>,
+    }
+
+    impl Transport for ScriptedTransport {
+        async fn recv(&mut self) -> ut325f_rs::Result<Vec<u8>> {
+            let Some((delay, _)) = self.script.front() else {
+                return std::future::pending().await;
+            };
+            tokio::time::sleep(*delay).await;
+            self.script.pop_front().expect("entry still present").1
+        }
+    }
+
+    /// One FourUp over scripted transports for sources "m1".."m4".
+    async fn fourup_with(
+        scripts: [Vec<(Duration, ut325f_rs::Result<Vec<u8>>)>; 4],
+        config: Config,
+    ) -> FourUp<ScriptedTransport> {
+        let sources: Vec<String> = (1..=4).map(|i| format!("m{i}")).collect();
+        let transports = Mutex::new(
+            scripts
+                .into_iter()
+                .map(|script| ScriptedTransport {
+                    script: script.into(),
+                })
+                .collect::<VecDeque<_>>(),
+        );
+        FourUp::open_with(
+            &sources,
+            |_| {
+                let transport = transports
+                    .lock()
+                    .expect("no poisoning")
+                    .pop_front()
+                    .expect("four scripts");
+                async move { Ok(Meter::new(transport)) }
+            },
+            config,
+        )
+        .await
+        .expect("open_with succeeds")
+    }
+
+    fn now(chunk: Vec<u8>) -> (Duration, ut325f_rs::Result<Vec<u8>>) {
+        (Duration::ZERO, Ok(chunk))
+    }
+
+    #[tokio::test]
+    async fn test_read_row_drains_to_latest() {
+        let mut fourup = fourup_with(
+            [
+                vec![now(frame([10.0, N, N, N])), now(frame([11.0, N, N, N]))],
+                vec![now(frame([N, 2.0, N, N]))],
+                vec![now(frame([N, N, 3.0, N]))],
+                vec![now(frame([N, N, N, 4.0]))],
+            ],
+            Config::default(),
+        )
+        .await;
+        let row = fourup.read_row().await.expect("row");
+        assert_eq!(row.temps_c, [11.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[tokio::test]
+    async fn test_read_row_names_failed_meter() {
+        let mut fourup = fourup_with(
+            [
+                vec![now(frame([1.0, N, N, N]))],
+                vec![now(frame([N, 2.0, N, N]))],
+                vec![(Duration::ZERO, Err(ut325f_rs::Error::Disconnected("gone")))],
+                vec![now(frame([N, N, N, 4.0]))],
+            ],
+            Config::default(),
+        )
+        .await;
+        let err = fourup.read_row().await.expect_err("m3 failed").to_string();
+        assert!(err.starts_with("m3: "), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn test_read_row_names_all_failed_meters() {
+        let mut fourup = fourup_with(
+            [
+                vec![now(frame([1.0, N, N, N]))],
+                vec![(Duration::ZERO, Err(ut325f_rs::Error::Disconnected("gone")))],
+                vec![now(frame([N, N, 3.0, N]))],
+                vec![(Duration::ZERO, Err(ut325f_rs::Error::Disconnected("gone")))],
+            ],
+            Config::default(),
+        )
+        .await;
+        let err = fourup.read_row().await.expect_err("two failed").to_string();
+        let lines: Vec<&str> = err.lines().collect();
+        assert_eq!(lines.len(), 2, "unexpected error: {err}");
+        assert!(lines[0].starts_with("m2: "), "unexpected error: {err}");
+        assert!(lines[1].starts_with("m4: "), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn test_read_row_gives_up_after_misaligned_budget() {
+        let config = Config {
+            max_skew: Duration::from_millis(50),
+            max_consecutive_skewed_rows: 1,
+            drain_timeout: Duration::from_millis(10),
+            ..Config::default()
+        };
+        let prompt = |temps| {
+            vec![
+                now(frame(temps)),
+                (Duration::from_millis(200), Ok(frame(temps))),
+            ]
+        };
+        let late = |temps| {
+            vec![
+                (Duration::from_millis(400), Ok(frame(temps))),
+                (Duration::from_millis(400), Ok(frame(temps))),
+            ]
+        };
+        let mut fourup = fourup_with(
+            [
+                prompt([1.0, N, N, N]),
+                prompt([N, 2.0, N, N]),
+                prompt([N, N, 3.0, N]),
+                late([N, N, N, 4.0]),
+            ],
+            config,
+        )
+        .await;
+        let err = fourup.read_row().await.expect_err("misaligned");
+        assert!(
+            matches!(err, Error::Misaligned { rows: 2, .. }),
+            "unexpected error: {err}"
+        );
+    }
+
     #[test]
     fn test_collect_all_reports_all_errors() {
         let results: Vec<Result<()>> = vec![

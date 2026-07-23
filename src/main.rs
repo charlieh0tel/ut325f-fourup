@@ -85,7 +85,13 @@ async fn discover(scan_time: Duration) -> Result<()> {
 }
 
 async fn run<T: Transport>(mut fourup: FourUp<T>, relative_timestamps: bool) -> Result<()> {
-    let result = read_rows(&mut fourup, relative_timestamps).await;
+    // Ctrl-C must also go through close: dying with connections held
+    // leaks them in the Bluetooth stack, and a connected meter stops
+    // advertising and disappears from later scans.
+    let result = tokio::select! {
+        result = read_rows(&mut fourup, relative_timestamps) => result,
+        interrupt = tokio::signal::ctrl_c() => interrupt.map_err(Into::into),
+    };
     let closed = fourup.close().await;
     // A read error is the story; a close failure matters only on an
     // otherwise clean exit.

@@ -98,12 +98,27 @@ async fn discover_four(scan_time: Duration) -> Result<Vec<String>> {
     Ok(meters.into_iter().map(|m| m.address).collect())
 }
 
+/// Meters send about three frames a second; frames already queued in
+/// the transport (startup backlog, slow consumer) return immediately,
+/// so a wait well under the frame interval distinguishes stale frames
+/// from a fresh one.
+const DRAIN_TIMEOUT: Duration = Duration::from_millis(50);
+
+/// Returns the meter's most recent reading, draining any queued
+/// backlog so the value reflects now rather than when it was queued.
+async fn read_latest<T: Transport>(meter: &mut Meter<T>) -> ut325f_rs::Result<Reading> {
+    let mut reading = meter.read().await?;
+    while let Ok(next) = tokio::time::timeout(DRAIN_TIMEOUT, meter.read()).await {
+        reading = next?;
+    }
+    Ok(reading)
+}
+
 async fn run<T: Transport>(mut meters: Vec<Meter<T>>, relative_timestamps: bool) -> Result<()> {
     let mut unix_time_offset: f64 = 0.;
 
     loop {
-        let maybe_readings =
-            futures::future::join_all(meters.iter_mut().map(|meter| meter.read())).await;
+        let maybe_readings = futures::future::join_all(meters.iter_mut().map(read_latest)).await;
         let readings = collect_readings(maybe_readings)?;
         let mut positional_readings = [f32::NAN; 4];
 

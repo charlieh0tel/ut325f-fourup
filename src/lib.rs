@@ -18,7 +18,10 @@ use std::time::SystemTime;
 pub use ut325f_rs::{BleTransport, DiscoveredMeter, Meter, Reading, SerialTransport, Transport};
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
+    #[error("Invalid config: {reason}.")]
+    InvalidConfig { reason: &'static str },
     #[error("Expected exactly four sources, got {0}.")]
     SourceCount(usize),
     #[error("Duplicate {kind}: {source_id}.")]
@@ -65,18 +68,42 @@ fn format_seen(seen: &[DiscoveredMeter]) -> String {
 }
 
 /// Synchronized-read behavior; [`Config::default`] matches the
-/// `ut325f-fourup` CLI.
+/// `ut325f-fourup` CLI. Values are validated when a [`FourUp`] is
+/// opened.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct Config {
     /// Widest allowed spread between the four timestamps of a row.
+    /// Must be nonzero.
     pub max_skew: Duration,
     /// Consecutive misaligned sets tolerated before
-    /// [`FourUp::read_row`] gives up.
+    /// [`FourUp::read_row`] gives up. Must be nonzero.
     pub max_consecutive_skewed_rows: u32,
     /// How long a meter must stay quiet before its last frame is
-    /// considered fresh rather than queued backlog. Must be well under
-    /// the ~333 ms frame interval.
+    /// considered fresh rather than queued backlog. Must be nonzero
+    /// and well under the ~333 ms frame interval; at most 250 ms.
     pub drain_timeout: Duration,
+}
+
+impl Config {
+    fn validate(&self) -> Result<()> {
+        if self.max_skew.is_zero() {
+            return Err(Error::InvalidConfig {
+                reason: "max_skew must be nonzero",
+            });
+        }
+        if self.max_consecutive_skewed_rows == 0 {
+            return Err(Error::InvalidConfig {
+                reason: "max_consecutive_skewed_rows must be nonzero",
+            });
+        }
+        if self.drain_timeout.is_zero() || self.drain_timeout > Duration::from_millis(250) {
+            return Err(Error::InvalidConfig {
+                reason: "drain_timeout must be nonzero and at most 250 ms",
+            });
+        }
+        Ok(())
+    }
 }
 
 impl Default for Config {
@@ -158,6 +185,7 @@ impl<T: Transport> FourUp<T> {
         F: Fn(String) -> Fut,
         Fut: Future<Output = ut325f_rs::Result<Meter<T>>>,
     {
+        config.validate()?;
         if sources.len() != 4 {
             return Err(Error::SourceCount(sources.len()));
         }
@@ -231,6 +259,11 @@ impl<T: Transport> FourUp<T> {
     }
 }
 
+/// Upper bound on frames discarded per drain; far above any real
+/// backlog, it guarantees the drain terminates even on a transport
+/// that is never quiet.
+const MAX_DRAIN_FRAMES: usize = 64;
+
 /// Returns the meter's most recent reading, draining any queued
 /// backlog so the value reflects now rather than when it was queued.
 async fn read_latest<T: Transport>(
@@ -238,8 +271,11 @@ async fn read_latest<T: Transport>(
     drain_timeout: Duration,
 ) -> ut325f_rs::Result<Reading> {
     let mut reading = meter.read().await?;
-    while let Ok(next) = tokio::time::timeout(drain_timeout, meter.read()).await {
-        reading = next?;
+    for _ in 0..MAX_DRAIN_FRAMES {
+        match tokio::time::timeout(drain_timeout, meter.read()).await {
+            Ok(next) => reading = next?,
+            Err(_) => break,
+        }
     }
     Ok(reading)
 }
@@ -375,6 +411,49 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert_eq!(err, "No meter reported position 3.");
+    }
+
+    async fn no_open(_: String) -> ut325f_rs::Result<Meter<SerialTransport>> {
+        unreachable!("open must not be called for an invalid config");
+    }
+
+    #[tokio::test]
+    async fn test_open_rejects_invalid_config() {
+        for (bad, reason) in [
+            (
+                Config {
+                    max_skew: Duration::ZERO,
+                    ..Config::default()
+                },
+                "max_skew must be nonzero",
+            ),
+            (
+                Config {
+                    max_consecutive_skewed_rows: 0,
+                    ..Config::default()
+                },
+                "max_consecutive_skewed_rows must be nonzero",
+            ),
+            (
+                Config {
+                    drain_timeout: Duration::ZERO,
+                    ..Config::default()
+                },
+                "drain_timeout must be nonzero and at most 250 ms",
+            ),
+            (
+                Config {
+                    drain_timeout: Duration::from_millis(300),
+                    ..Config::default()
+                },
+                "drain_timeout must be nonzero and at most 250 ms",
+            ),
+        ] {
+            let Err(err) = FourUp::open_with(&[], no_open, bad).await else {
+                panic!("config accepted: {reason}");
+            };
+            assert_eq!(err.to_string(), format!("Invalid config: {reason}."));
+        }
     }
 
     #[test]

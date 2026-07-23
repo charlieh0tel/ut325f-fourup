@@ -33,9 +33,10 @@ struct Args {
     discover: bool,
 
     /// Bluetooth scan duration in seconds, for --discover and --ble
-    /// without addresses.
-    #[arg(long, default_value_t = 8, value_name = "SECONDS")]
-    scan_time: u64,
+    /// without addresses [default: 8].
+    #[arg(long, value_name = "SECONDS",
+          value_parser = clap::value_parser!(u64).range(1..=3600))]
+    scan_time: Option<u64>,
 
     /// Serial ports to open or, with --ble, meter Bluetooth addresses.
     #[arg(num_args = 0..=4, action = ArgAction::Set, value_name = "PORT|ADDR")]
@@ -249,7 +250,10 @@ async fn run<T: Transport>(
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let scan_time = Duration::from_secs(args.scan_time);
+    if args.scan_time.is_some() && !args.ble && !args.discover {
+        bail!("--scan-time only applies to --discover and --ble.");
+    }
+    let scan_time = Duration::from_secs(args.scan_time.unwrap_or(8));
 
     if args.discover {
         if !args.ports.is_empty() {

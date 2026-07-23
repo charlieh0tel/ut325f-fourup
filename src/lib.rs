@@ -32,11 +32,13 @@ pub enum Error {
     #[error("{source_id}: {cause}")]
     Open {
         source_id: String,
+        #[source]
         cause: ut325f_rs::Error,
     },
     #[error("{source_id}: {cause}")]
     Read {
         source_id: String,
+        #[source]
         cause: ut325f_rs::Error,
     },
     #[error("Meter {source_id}: no active input.")]
@@ -56,7 +58,7 @@ pub enum Error {
     #[error("Expected to see exactly four meters, saw {}:{}", seen.len(), format_seen(seen))]
     DiscoverCount { seen: Vec<DiscoveredMeter> },
     #[error(transparent)]
-    Discover(ut325f_rs::Error),
+    Discover(#[from] ut325f_rs::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

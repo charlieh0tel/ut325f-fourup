@@ -8,7 +8,7 @@ on:
     branches: [ main ]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   check:
@@ -24,6 +24,8 @@ jobs:
       - run: cargo test --locked
 
   build-release:
+    permissions:
+      contents: write
     uses: charlieh0tel/deb-workflows/.github/workflows/rust-build-exes.yml@main
     with:
       build-deps: libdbus-1-dev

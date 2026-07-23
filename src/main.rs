@@ -18,6 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
+#[command(group = clap::ArgGroup::new("bluetooth").args(["ble", "discover"]))]
 struct Args {
     /// Makes timestamps start at zero.
     #[arg(long, short = 'z')]
@@ -34,7 +35,7 @@ struct Args {
 
     /// Bluetooth scan duration in seconds, for --discover and --ble
     /// without addresses [default: 8].
-    #[arg(long, value_name = "SECONDS",
+    #[arg(long, value_name = "SECONDS", requires = "bluetooth",
           value_parser = clap::value_parser!(u64).range(1..=3600))]
     scan_time: Option<u64>,
 
@@ -264,9 +265,6 @@ async fn run<T: Transport>(
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    if args.scan_time.is_some() && !args.ble && !args.discover {
-        bail!("--scan-time only applies to --discover and --ble.");
-    }
     let scan_time = Duration::from_secs(args.scan_time.unwrap_or(8));
 
     if args.discover {

@@ -59,9 +59,37 @@ pub enum Error {
     DiscoverCount { seen: Vec<DiscoveredMeter> },
     #[error(transparent)]
     Discover(#[from] ut325f_rs::Error),
+    #[error("{}", format_errors(errors))]
+    Multiple { errors: Vec<Error> },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+fn format_errors(errors: &[Error]) -> String {
+    errors
+        .iter()
+        .map(Error::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Collects results, reporting every failure rather than just the
+/// first (a single failure is returned unwrapped).
+fn collect_all<T>(results: Vec<Result<T>>) -> Result<Vec<T>> {
+    let mut values = Vec::new();
+    let mut errors = Vec::new();
+    for result in results {
+        match result {
+            Ok(value) => values.push(value),
+            Err(error) => errors.push(error),
+        }
+    }
+    match errors.len() {
+        0 => Ok(values),
+        1 => Err(errors.remove(0)),
+        _ => Err(Error::Multiple { errors }),
+    }
+}
 
 fn format_seen(seen: &[DiscoveredMeter]) -> String {
     seen.iter()
@@ -199,17 +227,19 @@ impl<T: Transport> FourUp<T> {
         check_distinct("source", sources, false)?;
         let maybe_meters =
             futures::future::join_all(sources.iter().map(|source| open(source.clone()))).await;
-        let meters = sources
-            .iter()
-            .zip(maybe_meters)
-            .map(|(source_id, meter)| match meter {
-                Ok(meter) => Ok((source_id.clone(), meter)),
-                Err(cause) => Err(Error::Open {
-                    source_id: source_id.clone(),
-                    cause,
-                }),
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let meters = collect_all(
+            sources
+                .iter()
+                .zip(maybe_meters)
+                .map(|(source_id, meter)| match meter {
+                    Ok(meter) => Ok((source_id.clone(), meter)),
+                    Err(cause) => Err(Error::Open {
+                        source_id: source_id.clone(),
+                        cause,
+                    }),
+                })
+                .collect(),
+        )?;
         Ok(Self {
             meters,
             config,
@@ -241,8 +271,7 @@ impl<T: Transport> FourUp<T> {
                 },
             ))
             .await;
-            let readings: Vec<(String, Reading)> =
-                maybe_readings.into_iter().collect::<Result<_>>()?;
+            let readings: Vec<(String, Reading)> = collect_all(maybe_readings)?;
 
             let timestamps = || readings.iter().map(|(_, r)| r.timestamp);
             let min_timestamp = timestamps().min().expect("four readings");
@@ -422,6 +451,22 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert_eq!(err, "No meter reported position 3.");
+    }
+
+    #[test]
+    fn test_collect_all_reports_all_errors() {
+        let results: Vec<Result<()>> = vec![
+            Err(Error::NoActiveInput {
+                source_id: "a".to_owned(),
+            }),
+            Ok(()),
+            Err(Error::MissingPosition { position: 2 }),
+        ];
+        let err = collect_all(results).unwrap_err().to_string();
+        assert_eq!(
+            err,
+            "Meter a: no active input.\nNo meter reported position 2."
+        );
     }
 
     async fn no_open(_: String) -> ut325f_rs::Result<Meter<SerialTransport>> {

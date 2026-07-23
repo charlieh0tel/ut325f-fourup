@@ -42,15 +42,41 @@ struct Args {
     ports: Vec<String>,
 }
 
-fn find_unique_non_nan_value_and_position(arr: [f32; 4]) -> Option<(f32, usize)> {
-    let mut non_nan_values = arr.iter().enumerate().filter(|&(_, &v)| !v.is_nan());
-
-    let first = non_nan_values.next()?;
-    if non_nan_values.next().is_none() {
-        Some((*first.1, first.0))
-    } else {
-        None
+/// Maps each meter's single active input to its position, diagnosing
+/// meters with no or several active inputs and position collisions.
+fn assemble_positions(readings: &[(String, Reading)]) -> Result<[f32; 4]> {
+    let mut positional = [f32::NAN; 4];
+    let mut claimed: [Option<&str>; 4] = [None; 4];
+    for (source, reading) in readings {
+        let active: Vec<(usize, f32)> = reading
+            .current_temps_c
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| !v.is_nan())
+            .map(|(position, &value)| (position, value))
+            .collect();
+        match active[..] {
+            [] => bail!("Meter {source}: no active input."),
+            [(position, value)] => {
+                if let Some(other) = claimed[position] {
+                    bail!(
+                        "Meters {other} and {source} both report position {}.",
+                        position + 1
+                    );
+                }
+                claimed[position] = Some(source);
+                positional[position] = value;
+            }
+            _ => bail!(
+                "Meter {source}: {} active inputs, expected exactly one.",
+                active.len()
+            ),
+        }
     }
+    if let Some(missing) = claimed.iter().position(|c| c.is_none()) {
+        bail!("No meter reported position {}.", missing + 1);
+    }
+    Ok(positional)
 }
 
 /// Writes a line to `writer`; returns Ok(false) when the consumer has
@@ -156,39 +182,23 @@ async fn run<T: Transport>(
     loop {
         let maybe_readings =
             futures::future::join_all(meters.iter_mut().map(|(source, meter)| async move {
-                read_latest(meter).await.with_context(|| source.clone())
+                read_latest(meter)
+                    .await
+                    .with_context(|| source.clone())
+                    .map(|reading| (source.clone(), reading))
             }))
             .await;
-        let readings: Vec<Reading> = maybe_readings.into_iter().collect::<Result<_>>()?;
-        let mut positional_readings = [f32::NAN; 4];
-
-        for reading in &readings {
-            if let Some((value, index)) =
-                find_unique_non_nan_value_and_position(reading.current_temps_c)
-            {
-                if positional_readings[index].is_nan() {
-                    positional_readings[index] = value
-                } else {
-                    return Err(anyhow!(
-                        "Multiple meters returned a value in the same position {}",
-                        index + 1
-                    ));
-                }
-            }
-        }
-
-        if positional_readings.iter().filter(|v| !v.is_nan()).count() != 4 {
-            bail!("Did not receive four readings.");
-        }
+        let readings: Vec<(String, Reading)> = maybe_readings.into_iter().collect::<Result<_>>()?;
+        let positional_readings = assemble_positions(&readings)?;
 
         let min_timestamp = readings
             .iter()
-            .map(|r| r.timestamp)
+            .map(|(_, r)| r.timestamp)
             .min()
             .with_context(|| "no min timestamp??")?;
         let max_timestamp = readings
             .iter()
-            .map(|r| r.timestamp)
+            .map(|(_, r)| r.timestamp)
             .max()
             .with_context(|| "no max timestamp??")?;
         let skew = max_timestamp.duration_since(min_timestamp)?;

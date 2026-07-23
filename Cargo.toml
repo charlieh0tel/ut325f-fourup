@@ -2,6 +2,9 @@
 name = "ut325f-fourup"
 version = "1.2.0"
 edition = "2024"
+description = "Reads four Uni-T UT325F thermocouple meters in lockstep"
+license = "BSD-3-Clause"
+repository = "https://github.com/charlieh0tel/ut325f-fourup"
 
 [features]
 default = ["serial", "ble", "cli"]

@@ -66,6 +66,25 @@ disconnects, times out, has no or several active inputs, or if two
 meters use the same input position.  Output ends cleanly when the
 consumer closes the pipe (e.g. `... | head`).
 
+## Library use
+
+The four-meter machinery is available as a library; the CLI is a thin
+consumer of it. `FourUp` opens four meters (serial, BLE by address, or
+BLE discovery) and reads synchronized rows:
+
+```rust
+use ut325f_fourup::{Config, FourUp};
+
+let mut fourup = FourUp::open_serial(&ports, Config::default()).await?;
+loop {
+    let row = fourup.read_row().await?; // row.timestamp, row.temps_c[0..4]
+}
+```
+
+`Config` controls the timestamp-skew window, the misaligned-row retry
+budget, and the backlog drain timeout. See the rustdoc (`cargo doc
+--open`) for details.
+
 ## Bluetooth prerequisites
 
 BLE uses the btleplug backend.  On Linux this talks to BlueZ over

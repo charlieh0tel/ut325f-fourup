@@ -11,6 +11,7 @@ use ut325f_rs::Meter;
 use ut325f_rs::Reading;
 use ut325f_rs::Transport;
 
+use std::io::Write;
 use std::time::Duration;
 
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -58,6 +59,16 @@ fn collect_readings(maybe_readings: Vec<ut325f_rs::Result<Reading>>) -> Result<V
         .collect::<ut325f_rs::Result<_>>()?)
 }
 
+/// Writes a line to `writer`; returns Ok(false) when the consumer has
+/// gone away (e.g. piped to head), which ends output cleanly.
+fn write_line(writer: &mut impl Write, line: std::fmt::Arguments) -> Result<bool> {
+    match writer.write_fmt(format_args!("{line}\n")) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
 pub fn system_time_to_unix_seconds(time: SystemTime) -> Result<f64> {
     match time.duration_since(UNIX_EPOCH) {
         Ok(duration) => {
@@ -74,11 +85,17 @@ async fn discover(scan_time: Duration) -> Result<()> {
     if meters.is_empty() {
         eprintln!("No meters found.");
     }
+    let mut stdout = std::io::stdout().lock();
     for meter in &meters {
         let rssi = meter
             .rssi
             .map_or_else(|| "cached".to_owned(), |rssi| format!("{rssi} dBm"));
-        println!("{}  {}  [{}]", meter.address, meter.name, rssi);
+        if !write_line(
+            &mut stdout,
+            format_args!("{}  {}  [{}]", meter.address, meter.name, rssi),
+        )? {
+            break;
+        }
     }
     Ok(())
 }
@@ -120,6 +137,7 @@ const MAX_CONSECUTIVE_SKEWED_ROWS: u32 = 5;
 async fn run<T: Transport>(mut meters: Vec<Meter<T>>, relative_timestamps: bool) -> Result<()> {
     let mut unix_time_offset: f64 = 0.;
     let mut consecutive_skewed_rows: u32 = 0;
+    let mut stdout = std::io::stdout().lock();
 
     loop {
         let maybe_readings = futures::future::join_all(meters.iter_mut().map(read_latest)).await;
@@ -173,14 +191,19 @@ async fn run<T: Transport>(mut meters: Vec<Meter<T>>, relative_timestamps: bool)
         }
 
         let timestamp = system_time_to_unix_seconds(timestamp)? - unix_time_offset;
-        println!(
-            "{:.3},{:.3},{:.3},{:.3},{:.3}",
-            timestamp,
-            positional_readings[0],
-            positional_readings[1],
-            positional_readings[2],
-            positional_readings[3]
-        );
+        if !write_line(
+            &mut stdout,
+            format_args!(
+                "{:.3},{:.3},{:.3},{:.3},{:.3}",
+                timestamp,
+                positional_readings[0],
+                positional_readings[1],
+                positional_readings[2],
+                positional_readings[3]
+            ),
+        )? {
+            return Ok(());
+        }
     }
 }
 

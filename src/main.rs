@@ -13,6 +13,7 @@ use ut325f_rs::Transport;
 
 use std::io::Write;
 use std::time::Duration;
+use std::time::Instant;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -182,7 +183,7 @@ async fn run<T: Transport>(
     mut meters: Vec<(String, Meter<T>)>,
     relative_timestamps: bool,
 ) -> Result<()> {
-    let mut unix_time_offset: f64 = 0.;
+    let mut relative_start: Option<Instant> = None;
     let mut consecutive_skewed_rows: u32 = 0;
     let mut stdout = std::io::stdout().lock();
 
@@ -220,12 +221,16 @@ async fn run<T: Transport>(
         }
         consecutive_skewed_rows = 0;
 
-        let timestamp = min_timestamp;
-        if relative_timestamps && unix_time_offset == 0. {
-            unix_time_offset = system_time_to_unix_seconds(timestamp)?;
-        }
-
-        let timestamp = system_time_to_unix_seconds(timestamp)? - unix_time_offset;
+        // Relative time comes from a monotonic clock so a stepped
+        // system clock (NTP, manual change) can't make it jump.
+        let timestamp = if relative_timestamps {
+            relative_start
+                .get_or_insert_with(Instant::now)
+                .elapsed()
+                .as_secs_f64()
+        } else {
+            system_time_to_unix_seconds(min_timestamp)?
+        };
         if !write_line(
             &mut stdout,
             format_args!(

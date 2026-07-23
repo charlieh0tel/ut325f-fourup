@@ -31,11 +31,15 @@ meters; paired-but-absent meters are ignored):
 ut325f-fourup --ble
 ```
 
-List meters visible over Bluetooth LE and exit:
+List meters known to the Bluetooth stack and exit:
 
 ```
 ut325f-fourup --discover
 ```
+
+Meters not seen during the scan (e.g. paired but powered off) are
+listed as `[cached]`; only meters actually seen count toward `--ble`
+auto-discovery's exactly-four requirement.
 
 `--scan-time SECONDS` (default 8) sets the scan duration for
 `--discover` and `--ble` without addresses.

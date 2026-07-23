@@ -172,7 +172,7 @@ pub struct FourUp<T: Transport> {
 impl FourUp<SerialTransport> {
     /// Opens four meters on USB serial ports (e.g. "/dev/ttyUSB0").
     pub async fn open_serial(ports: &[String], config: Config) -> Result<Self> {
-        check_distinct("port", ports, false)?;
+        check_sources("port", ports, false)?;
         Self::open_with(
             ports,
             async |port: String| Meter::open_serial(&port).await,
@@ -186,7 +186,7 @@ impl FourUp<SerialTransport> {
 impl FourUp<BleTransport> {
     /// Opens four meters by Bluetooth address (e.g. "E8:26:CF:F1:23:61").
     pub async fn open_ble(addresses: &[String], config: Config) -> Result<Self> {
-        check_distinct("address", addresses, true)?;
+        check_sources("address", addresses, true)?;
         Self::open_with(
             addresses,
             async |address: String| Meter::open_ble(&address).await,
@@ -229,10 +229,7 @@ impl<T: Transport> FourUp<T> {
         Fut: Future<Output = ut325f_rs::Result<Meter<T>>>,
     {
         config.validate()?;
-        if sources.len() != 4 {
-            return Err(Error::SourceCount(sources.len()));
-        }
-        check_distinct("source", sources, false)?;
+        check_sources("source", sources, false)?;
         let maybe_meters =
             futures::future::join_all(sources.iter().map(|source| open(source.clone()))).await;
         let meters = collect_all(
@@ -326,6 +323,15 @@ async fn read_latest<T: Transport>(
         }
     }
     Ok(reading)
+}
+
+/// Requires exactly four distinct sources, count checked first so a
+/// short list always reports its length regardless of contents.
+fn check_sources(kind: &'static str, sources: &[String], ignore_ascii_case: bool) -> Result<()> {
+    if sources.len() != 4 {
+        return Err(Error::SourceCount(sources.len()));
+    }
+    check_distinct(kind, sources, ignore_ascii_case)
 }
 
 /// Rejects repeated sources before any is opened; Bluetooth addresses
@@ -687,6 +693,15 @@ mod tests {
             };
             assert_eq!(err.to_string(), format!("Invalid config: {reason}."));
         }
+    }
+
+    #[test]
+    fn test_check_sources_count_before_duplicates() {
+        let sources = ["a".to_owned(), "a".to_owned()];
+        assert!(matches!(
+            check_sources("port", &sources, false),
+            Err(Error::SourceCount(2))
+        ));
     }
 
     #[test]

@@ -71,12 +71,14 @@ async fn discover(scan_time: Duration) -> Result<()> {
     }
     let mut stdout = std::io::stdout().lock();
     for meter in &meters {
-        let rssi = meter
-            .rssi
-            .map_or_else(|| "cached".to_owned(), |rssi| format!("{rssi} dBm"));
+        let status = match (meter.connected, meter.rssi) {
+            (true, _) => "connected".to_owned(),
+            (false, Some(rssi)) => format!("{rssi} dBm"),
+            (false, None) => "cached".to_owned(),
+        };
         if !write_line(
             &mut stdout,
-            format_args!("{}  {}  [{}]", meter.address, meter.name, rssi),
+            format_args!("{}  {}  [{}]", meter.address, meter.name, status),
         )? {
             break;
         }

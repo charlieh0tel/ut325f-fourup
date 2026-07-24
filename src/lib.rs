@@ -201,15 +201,17 @@ impl FourUp<BleTransport> {
         .await
     }
 
-    /// Scans for `scan_time` and opens the meters seen, requiring that
-    /// exactly four were seen. Meters only known from the Bluetooth
-    /// stack's cache (e.g. paired but powered off) are ignored.
+    /// Scans for `scan_time` and opens the meters present, requiring
+    /// that exactly four are: seen in the scan, or already connected
+    /// to this host (a connected meter stops advertising). Meters only
+    /// known from the Bluetooth stack's cache (e.g. paired but powered
+    /// off) are ignored.
     pub async fn discover_ble(scan_time: Duration, config: Config) -> Result<Self> {
         let seen: Vec<_> = BleTransport::discover(scan_time)
             .await
             .map_err(Error::Discover)?
             .into_iter()
-            .filter(|m| m.rssi.is_some())
+            .filter(|m| m.rssi.is_some() || m.connected)
             .collect();
         if seen.len() != 4 {
             return Err(Error::DiscoverCount { seen });

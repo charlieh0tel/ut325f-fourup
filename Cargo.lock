@@ -982,9 +982,9 @@ dependencies = [
 
 [[package]]
 name = "ut325f-rs"
-version = "1.2.1"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "176ecf8369c13cb25432b4dbdc71d8e3348430d4291580a7c135dce34d7561b7"
+checksum = "4c322ccb544b49d7708eaf599030ed6fd2e262e3477a5889ecf694fcf8b562d5"
 dependencies = [
  "anyhow",
  "btleplug",

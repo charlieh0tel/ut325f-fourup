@@ -71,6 +71,11 @@ disconnects, times out, has no or several active inputs, or if two
 meters use the same input position.  Output ends cleanly when the
 consumer closes the pipe (e.g. `... | head`).
 
+On exit (including Ctrl-C and errors) BLE meters are left connected:
+a connected meter stays awake and the next run finds it without a
+scan.  Pass `--disconnect` to release them instead so they can
+sleep.
+
 ## Library use
 
 The four-meter machinery is available as a library; the CLI is a thin

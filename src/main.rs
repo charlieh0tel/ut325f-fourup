@@ -25,12 +25,21 @@ struct Args {
 
     /// Use Bluetooth LE: give four addresses (e.g. E8:26:CF:F1:23:61),
     /// or none to discover exactly four meters.
-    #[arg(long, short = 'b', conflicts_with = "discover")]
+    // The single-member ble_mode group exists for `requires`: clap
+    // treats `requires = "ble"` as satisfied by any member of a group
+    // ble belongs to (here, --discover via the bluetooth group).
+    #[arg(long, short = 'b', conflicts_with = "discover", group = "ble_mode")]
     ble: bool,
 
     /// Discover meters over Bluetooth LE, print them, and exit.
     #[arg(long, short = 'd')]
     discover: bool,
+
+    /// Disconnect the meters on exit. By default they are left
+    /// connected: a connected meter stays awake and the next run
+    /// finds it without a scan.
+    #[arg(long, requires = "ble_mode")]
+    disconnect: bool,
 
     /// Bluetooth scan duration in seconds, for --discover and --ble
     /// without addresses [default: 8].
@@ -86,18 +95,26 @@ async fn discover(scan_time: Duration) -> Result<()> {
     Ok(())
 }
 
-async fn run<T: Transport>(mut fourup: FourUp<T>, relative_timestamps: bool) -> Result<()> {
-    // Ctrl-C must also go through close: dying with connections held
-    // leaks them in the Bluetooth stack, and a connected meter stops
-    // advertising and disappears from later scans.
+async fn run<T: Transport>(
+    mut fourup: FourUp<T>,
+    relative_timestamps: bool,
+    disconnect: bool,
+) -> Result<()> {
+    // Ctrl-C must also go through teardown: dying with connections
+    // held leaves them dangling in the Bluetooth stack instead of
+    // deliberately kept (detach) or released (close).
     let result = tokio::select! {
         result = read_rows(&mut fourup, relative_timestamps) => result,
         interrupt = tokio::signal::ctrl_c() => interrupt.map_err(Into::into),
     };
-    let closed = fourup.close().await;
-    // A read error is the story; a close failure matters only on an
-    // otherwise clean exit.
-    result.and(closed.map_err(Into::into))
+    let torn_down = if disconnect {
+        fourup.close().await
+    } else {
+        fourup.detach().await
+    };
+    // A read error is the story; a teardown failure matters only on
+    // an otherwise clean exit.
+    result.and(torn_down.map_err(Into::into))
 }
 
 async fn read_rows<T: Transport>(fourup: &mut FourUp<T>, relative_timestamps: bool) -> Result<()> {
@@ -147,14 +164,14 @@ async fn main() -> Result<()> {
             4 => FourUp::open_ble(&args.ports, Config::default()).await?,
             n => bail!("--ble takes four addresses or none to discover, got {n}."),
         };
-        return run(fourup, args.relative_timestamps).await;
+        return run(fourup, args.relative_timestamps, args.disconnect).await;
     }
 
     if args.ports.len() != 4 {
         bail!("Four ports not specified.");
     }
     let fourup = FourUp::open_serial(&args.ports, Config::default()).await?;
-    run(fourup, args.relative_timestamps).await
+    run(fourup, args.relative_timestamps, args.disconnect).await
 }
 
 #[cfg(test)]

@@ -321,15 +321,28 @@ impl<T: Transport> FourUp<T> {
     /// the end of a session: cleanup spawned from drop does not
     /// survive runtime shutdown at process exit.
     pub async fn close(self) -> Result<()> {
-        let results = futures::future::join_all(self.meters.into_iter().map(
-            |(source_id, meter)| async move {
-                meter
-                    .close()
-                    .await
-                    .map_err(|cause| Error::Close { source_id, cause })
-            },
-        ))
-        .await;
+        Self::teardown(self.meters, true).await
+    }
+
+    /// Releases all four meters, leaving their connections with the
+    /// Bluetooth stack: a connected meter stays awake and needs no
+    /// rediscovery ([`FourUp::discover_ble`] counts it as present).
+    /// Use [`FourUp::close`] instead to let the meters sleep.
+    pub async fn detach(self) -> Result<()> {
+        Self::teardown(self.meters, false).await
+    }
+
+    async fn teardown(meters: Vec<(String, Meter<T>)>, disconnect: bool) -> Result<()> {
+        let results =
+            futures::future::join_all(meters.into_iter().map(|(source_id, meter)| async move {
+                let result = if disconnect {
+                    meter.close().await
+                } else {
+                    meter.detach().await
+                };
+                result.map_err(|cause| Error::Close { source_id, cause })
+            }))
+            .await;
         collect_all(results).map(|_| ())
     }
 }

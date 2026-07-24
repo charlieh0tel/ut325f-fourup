@@ -188,14 +188,40 @@ impl FourUp<SerialTransport> {
     }
 }
 
+/// Connect attempts per meter. BlueZ sporadically aborts an LE
+/// connect (le-connection-abort-by-local), e.g. while the controller
+/// is still winding down a discovery; a retry nearly always succeeds.
+#[cfg(feature = "ble")]
+const BLE_CONNECT_ATTEMPTS: u32 = 3;
+#[cfg(feature = "ble")]
+const BLE_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(500);
+
+#[cfg(feature = "ble")]
+async fn open_ble_retrying(address: &str) -> ut325f_rs::Result<Meter<BleTransport>> {
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        match Meter::open_ble(address).await {
+            Err(e)
+                if matches!(e, ut325f_rs::Error::ConnectFailed { .. })
+                    && attempts < BLE_CONNECT_ATTEMPTS =>
+            {
+                tokio::time::sleep(BLE_CONNECT_RETRY_DELAY).await;
+            }
+            result => return result,
+        }
+    }
+}
+
 #[cfg(feature = "ble")]
 impl FourUp<BleTransport> {
     /// Opens four meters by Bluetooth address (e.g. "E8:26:CF:F1:23:61").
+    /// Transient connect failures are retried a few times.
     pub async fn open_ble(addresses: &[String], config: Config) -> Result<Self> {
         check_sources("address", addresses, true)?;
         Self::open_with(
             addresses,
-            async |address: String| Meter::open_ble(&address).await,
+            async |address: String| open_ble_retrying(&address).await,
             config,
         )
         .await

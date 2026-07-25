@@ -300,9 +300,12 @@ impl<T: Transport> FourUp<T> {
     }
 
     /// Returns the next synchronized row: each meter's freshest frame,
-    /// mapped to columns by input position. Misaligned sets are
-    /// discarded and re-read, up to
-    /// [`Config::max_consecutive_skewed_rows`].
+    /// mapped to columns by input position. Up to
+    /// [`Config::max_consecutive_skewed_rows`] consecutive misaligned
+    /// sets are discarded and re-read; the next one fails with
+    /// [`Error::Misaligned`], whose `rows` is the total number of
+    /// misaligned sets seen. A retrying caller gets the full budget
+    /// again.
     ///
     /// Not cancellation-safe: dropping this future mid-flight (e.g.
     /// racing it in `select!` or under an outer timeout) leaves the

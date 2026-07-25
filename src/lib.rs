@@ -255,8 +255,10 @@ impl<T: Transport> FourUp<T> {
     /// Meters are opened one at a time: concurrent LE connection
     /// attempts abort each other in BlueZ
     /// (le-connection-abort-by-local). On failure, meters already
-    /// opened are closed before the error returns, so nothing stays
-    /// connected.
+    /// opened are detached before the error returns: their
+    /// connections stay with the Bluetooth stack (never torn down —
+    /// an adopted connection may belong to another session, and a
+    /// kept one leaves the meters awake for the retry).
     ///
     /// A custom transport's `recv` must be cancellation-safe (no data
     /// consumed by a future dropped before completion, as with the
@@ -275,7 +277,7 @@ impl<T: Transport> FourUp<T> {
                 Ok(meter) => meters.push((source_id.clone(), meter)),
                 Err(cause) => {
                     for (_, meter) in meters {
-                        let _ = meter.close().await;
+                        let _ = meter.detach().await;
                     }
                     return Err(Error::Open {
                         source_id: source_id.clone(),

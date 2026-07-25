@@ -66,7 +66,7 @@ pub enum Error {
     #[error("Readings misaligned by {skew:?} for {rows} consecutive rows.")]
     Misaligned { skew: Duration, rows: u32 },
     #[cfg(feature = "ble")]
-    #[error("Expected to see exactly four meters, saw {}:{}", seen.len(), format_seen(seen))]
+    #[error("Expected to see exactly four meters, saw {}{}", seen.len(), format_seen(seen))]
     DiscoverCount { seen: Vec<DiscoveredMeter> },
     #[error(transparent)]
     Discover(ut325f_rs::Error),
@@ -104,9 +104,14 @@ fn collect_all<T>(results: Vec<Result<T>>) -> Result<Vec<T>> {
 
 #[cfg(feature = "ble")]
 fn format_seen(seen: &[DiscoveredMeter]) -> String {
-    seen.iter()
+    if seen.is_empty() {
+        return ".".to_owned();
+    }
+    let list: String = seen
+        .iter()
         .map(|m| format!("\n  {}  {}", m.address, m.name))
-        .collect()
+        .collect();
+    format!(":{list}")
 }
 
 /// Synchronized-read behavior; [`Config::default`] matches the
@@ -775,6 +780,25 @@ mod tests {
             };
             assert_eq!(err.to_string(), format!("Invalid config: {reason}."));
         }
+    }
+
+    #[cfg(feature = "ble")]
+    #[test]
+    fn test_discover_count_rendering() {
+        assert_eq!(
+            Error::DiscoverCount { seen: vec![] }.to_string(),
+            "Expected to see exactly four meters, saw 0."
+        );
+        let seen = vec![DiscoveredMeter {
+            address: "AA:BB:CC:DD:EE:FF".to_owned(),
+            name: "UT325F X".to_owned(),
+            rssi: Some(-50),
+            connected: false,
+        }];
+        assert_eq!(
+            Error::DiscoverCount { seen }.to_string(),
+            "Expected to see exactly four meters, saw 1:\n  AA:BB:CC:DD:EE:FF  UT325F X"
+        );
     }
 
     #[test]

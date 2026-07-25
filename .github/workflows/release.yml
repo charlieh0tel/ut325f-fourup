@@ -1,10 +1,8 @@
-name: Build
+name: Release
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    tags: [ 'v*' ]
 
 permissions:
   contents: read
@@ -28,16 +26,11 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
-      - run: cargo check --lib --locked --no-default-features
-      - run: cargo clippy --lib --tests --locked --no-default-features --features serial -- -D warnings
-      - run: cargo test --locked --no-default-features --features serial
-      - run: cargo clippy --lib --tests --locked --no-default-features --features ble -- -D warnings
-      - run: cargo test --locked --no-default-features --features ble
 
-  # Validation build only; the write-authorized release lives in
-  # release.yml and runs solely on tag pushes.
-  build:
+  build-release:
     needs: check
+    permissions:
+      contents: write
     uses: charlieh0tel/deb-workflows/.github/workflows/rust-build-exes.yml@main
     with:
       build-deps: libdbus-1-dev

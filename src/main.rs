@@ -54,12 +54,19 @@ struct Args {
 
 /// Writes a line to `writer`; returns Ok(false) when the consumer has
 /// gone away (e.g. piped to head), which ends output cleanly.
-fn write_line(writer: &mut impl Write, line: std::fmt::Arguments) -> Result<bool> {
-    match writer.write_fmt(format_args!("{line}\n")) {
+fn write_line(writer: &mut impl Write, line: &str) -> Result<bool> {
+    match writeln!(writer, "{line}") {
         Ok(()) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(false),
         Err(e) => Err(e.into()),
     }
+}
+
+/// Writes a line to stdout on the blocking pool: a consumer that
+/// stalls without closing the pipe blocks the write, and it must not
+/// wedge the async task that is also polling Ctrl-C.
+async fn write_stdout_line(line: String) -> Result<bool> {
+    tokio::task::spawn_blocking(move || write_line(&mut std::io::stdout().lock(), &line)).await?
 }
 
 pub fn system_time_to_unix_seconds(time: SystemTime) -> Result<f64> {
@@ -78,17 +85,13 @@ async fn discover(scan_time: Duration) -> Result<()> {
     if meters.is_empty() {
         eprintln!("No meters found.");
     }
-    let mut stdout = std::io::stdout().lock();
     for meter in &meters {
         let status = match (meter.connected, meter.rssi) {
             (true, _) => "connected".to_owned(),
             (false, Some(rssi)) => format!("{rssi} dBm"),
             (false, None) => "cached".to_owned(),
         };
-        if !write_line(
-            &mut stdout,
-            format_args!("{}  {}  [{}]", meter.address, meter.name, status),
-        )? {
+        if !write_stdout_line(format!("{}  {}  [{}]", meter.address, meter.name, status)).await? {
             break;
         }
     }
@@ -121,15 +124,27 @@ async fn run<T: Transport>(
     // Ctrl-C must also go through teardown: dying with connections
     // held leaves them dangling in the Bluetooth stack instead of
     // deliberately kept (detach) or released (close).
-    let result = tokio::select! {
+    let mut interrupted = false;
+    let result: Result<()> = tokio::select! {
         result = read_rows(&mut fourup, relative_timestamps) => result,
-        interrupt = tokio::signal::ctrl_c() => interrupt.map_err(Into::into),
+        interrupt = tokio::signal::ctrl_c() => {
+            interrupted = true;
+            interrupt.map_err(Into::into)
+        }
     };
     let torn_down = if disconnect {
         fourup.close().await
     } else {
         fourup.detach().await
     };
+    if interrupted {
+        // Exit directly: runtime drop would wait for a row write
+        // still blocked on a stalled consumer.
+        if let Err(e) = torn_down {
+            eprintln!("Error: {e}");
+        }
+        std::process::exit(130);
+    }
     // A read error is the story; a teardown failure matters only on
     // an otherwise clean exit.
     result.and(torn_down.map_err(Into::into))
@@ -137,7 +152,6 @@ async fn run<T: Transport>(
 
 async fn read_rows<T: Transport>(fourup: &mut FourUp<T>, relative_timestamps: bool) -> Result<()> {
     let mut relative_start: Option<Instant> = None;
-    let mut stdout = std::io::stdout().lock();
 
     loop {
         let row = fourup.read_row().await?;
@@ -152,13 +166,12 @@ async fn read_rows<T: Transport>(fourup: &mut FourUp<T>, relative_timestamps: bo
         } else {
             system_time_to_unix_seconds(row.timestamp)?
         };
-        if !write_line(
-            &mut stdout,
-            format_args!(
-                "{:.3},{:.3},{:.3},{:.3},{:.3}",
-                timestamp, row.temps_c[0], row.temps_c[1], row.temps_c[2], row.temps_c[3]
-            ),
-        )? {
+        if !write_stdout_line(format!(
+            "{:.3},{:.3},{:.3},{:.3},{:.3}",
+            timestamp, row.temps_c[0], row.temps_c[1], row.temps_c[2], row.temps_c[3]
+        ))
+        .await?
+        {
             return Ok(());
         }
     }
@@ -218,8 +231,8 @@ mod tests {
     #[test]
     fn test_write_line() {
         let mut buf = Vec::new();
-        assert!(write_line(&mut buf, format_args!("row")).unwrap());
+        assert!(write_line(&mut buf, "row").unwrap());
         assert_eq!(buf, b"row\n");
-        assert!(!write_line(&mut BrokenPipeWriter, format_args!("row")).unwrap());
+        assert!(!write_line(&mut BrokenPipeWriter, "row").unwrap());
     }
 }

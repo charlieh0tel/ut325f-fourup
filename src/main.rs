@@ -132,10 +132,19 @@ async fn run<T: Transport>(
             interrupt.map_err(Into::into)
         }
     };
-    let torn_down = if disconnect {
-        fourup.close().await
-    } else {
-        fourup.detach().await
+    // Bounded: a stuck Bluetooth/D-Bus operation must not hang exit.
+    const TEARDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+    let torn_down: Result<()> = match tokio::time::timeout(TEARDOWN_TIMEOUT, async {
+        if disconnect {
+            fourup.close().await
+        } else {
+            fourup.detach().await
+        }
+    })
+    .await
+    {
+        Ok(torn_down) => torn_down.map_err(Into::into),
+        Err(_) => Err(anyhow!("Teardown timed out after {TEARDOWN_TIMEOUT:?}.")),
     };
     if interrupted {
         // Exit directly: runtime drop would wait for a row write

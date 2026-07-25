@@ -95,6 +95,24 @@ async fn discover(scan_time: Duration) -> Result<()> {
     Ok(())
 }
 
+/// Races `open` against Ctrl-C: the discovery/connect phase can last
+/// minutes, and an unhandled SIGINT there kills the process with
+/// connections half-established. On interrupt the dropped open's
+/// guards spawn best-effort disconnects; a short grace period lets
+/// them run before exit.
+async fn open_interruptible<T: Transport>(
+    open: impl Future<Output = ut325f_fourup::Result<FourUp<T>>>,
+) -> Result<FourUp<T>> {
+    tokio::select! {
+        fourup = open => Ok(fourup?),
+        interrupt = tokio::signal::ctrl_c() => {
+            interrupt?;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            std::process::exit(130);
+        }
+    }
+}
+
 async fn run<T: Transport>(
     mut fourup: FourUp<T>,
     relative_timestamps: bool,
@@ -160,8 +178,8 @@ async fn main() -> Result<()> {
 
     if args.ble {
         let fourup = match args.ports.len() {
-            0 => FourUp::discover_ble(scan_time, Config::default()).await?,
-            4 => FourUp::open_ble(&args.ports, Config::default()).await?,
+            0 => open_interruptible(FourUp::discover_ble(scan_time, Config::default())).await?,
+            4 => open_interruptible(FourUp::open_ble(&args.ports, Config::default())).await?,
             n => bail!("--ble takes four addresses or none to discover, got {n}."),
         };
         return run(fourup, args.relative_timestamps, args.disconnect).await;
@@ -170,7 +188,7 @@ async fn main() -> Result<()> {
     if args.ports.len() != 4 {
         bail!("Four ports not specified.");
     }
-    let fourup = FourUp::open_serial(&args.ports, Config::default()).await?;
+    let fourup = open_interruptible(FourUp::open_serial(&args.ports, Config::default())).await?;
     run(fourup, args.relative_timestamps, args.disconnect).await
 }
 

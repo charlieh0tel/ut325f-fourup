@@ -264,9 +264,9 @@ impl<T: Transport> FourUp<T> {
     /// consumed by a future dropped before completion, as with the
     /// serial and BLE transports): draining races `recv` against a
     /// timeout and drops the loser.
-    pub async fn open_with<F, Fut>(sources: &[String], open: F, config: Config) -> Result<Self>
+    pub async fn open_with<F, Fut>(sources: &[String], mut open: F, config: Config) -> Result<Self>
     where
-        F: Fn(String) -> Fut,
+        F: FnMut(String) -> Fut,
         Fut: Future<Output = ut325f_rs::Result<Meter<T>>>,
     {
         config.validate()?;
@@ -539,7 +539,6 @@ mod tests {
     }
 
     use std::collections::VecDeque;
-    use std::sync::Mutex;
 
     /// A frame with the given current temps (NaN = inactive input),
     /// held temps all inactive, hold type Current.
@@ -589,22 +588,16 @@ mod tests {
         config: Config,
     ) -> FourUp<ScriptedTransport> {
         let sources: Vec<String> = (1..=4).map(|i| format!("m{i}")).collect();
-        let transports = Mutex::new(
-            scripts
-                .into_iter()
-                .map(|script| ScriptedTransport {
-                    script: script.into(),
-                })
-                .collect::<VecDeque<_>>(),
-        );
+        let mut transports: VecDeque<_> = scripts
+            .into_iter()
+            .map(|script| ScriptedTransport {
+                script: script.into(),
+            })
+            .collect();
         FourUp::open_with(
             &sources,
             |_| {
-                let transport = transports
-                    .lock()
-                    .expect("no poisoning")
-                    .pop_front()
-                    .expect("four scripts");
+                let transport = transports.pop_front().expect("four scripts");
                 async move { Ok(Meter::new(transport)) }
             },
             config,

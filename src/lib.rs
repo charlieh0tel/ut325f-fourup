@@ -69,7 +69,7 @@ pub enum Error {
     #[error("Expected to see exactly four meters, saw {}:{}", seen.len(), format_seen(seen))]
     DiscoverCount { seen: Vec<DiscoveredMeter> },
     #[error(transparent)]
-    Discover(#[from] ut325f_rs::Error),
+    Discover(ut325f_rs::Error),
     #[error("{}", format_errors(errors))]
     Multiple { errors: Vec<Error> },
 }
@@ -160,6 +160,7 @@ impl Default for Config {
 
 /// One synchronized sample set.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct Row {
     /// Earliest timestamp of the four readings.
     pub timestamp: SystemTime,

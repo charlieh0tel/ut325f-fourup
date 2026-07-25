@@ -37,7 +37,7 @@ jobs:
 
   # Validation build for branch pushes and PRs; no write authority.
   build:
-    if: "!startsWith(github.ref, 'refs/tags/')"
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     needs: check
     uses: charlieh0tel/deb-workflows/.github/workflows/rust-build-exes.yml@main
     with:
@@ -45,7 +45,7 @@ jobs:
 
   # Tag pushes only: the sole job holding release (write) authority.
   build-release:
-    if: startsWith(github.ref, 'refs/tags/')
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
     needs: check
     permissions:
       contents: write

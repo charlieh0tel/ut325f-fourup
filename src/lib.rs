@@ -119,7 +119,7 @@ pub struct Config {
     /// Must be nonzero.
     pub max_skew: Duration,
     /// Consecutive misaligned sets tolerated before
-    /// [`FourUp::read_row`] gives up. Must be nonzero.
+    /// [`FourUp::read_row`] gives up. Must be between 1 and 1,000,000.
     pub max_consecutive_skewed_rows: u32,
     /// How long a meter must stay quiet before its last frame is
     /// considered fresh rather than queued backlog. Must be nonzero
@@ -134,9 +134,9 @@ impl Config {
                 reason: "max_skew must be nonzero",
             });
         }
-        if self.max_consecutive_skewed_rows == 0 {
+        if self.max_consecutive_skewed_rows == 0 || self.max_consecutive_skewed_rows > 1_000_000 {
             return Err(Error::InvalidConfig {
-                reason: "max_consecutive_skewed_rows must be nonzero",
+                reason: "max_consecutive_skewed_rows must be between 1 and 1000000",
             });
         }
         if self.drain_timeout.is_zero() || self.drain_timeout > Duration::from_millis(250) {
@@ -752,7 +752,14 @@ mod tests {
                     max_consecutive_skewed_rows: 0,
                     ..Config::default()
                 },
-                "max_consecutive_skewed_rows must be nonzero",
+                "max_consecutive_skewed_rows must be between 1 and 1000000",
+            ),
+            (
+                Config {
+                    max_consecutive_skewed_rows: u32::MAX,
+                    ..Config::default()
+                },
+                "max_consecutive_skewed_rows must be between 1 and 1000000",
             ),
             (
                 Config {

@@ -34,15 +34,10 @@ jobs:
       - run: cargo clippy --lib --tests --locked --no-default-features --features ble -- -D warnings
       - run: cargo test --locked --no-default-features --features ble
 
-  # Validation build; releases happen in release.yml on tag pushes.
-  # contents:write is forced here: the reusable workflow's release job
-  # declares it, and a caller granting less fails at startup - even
-  # though that job never runs off a tag. Droppable once deb-workflows
-  # stops declaring job-level permissions.
+  # Validation build only (read-only token); the write-authorized
+  # release lives in release.yml and runs solely on tag pushes.
   build:
     needs: check
-    permissions:
-      contents: write
     uses: charlieh0tel/deb-workflows/.github/workflows/rust-build-exes.yml@main
     with:
       build-deps: libdbus-1-dev

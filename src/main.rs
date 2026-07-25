@@ -38,7 +38,9 @@ struct Args {
     /// Disconnect the meters on exit. By default they are left
     /// connected: a connected meter stays awake and the next run
     /// finds it without a scan.
-    #[arg(long, requires = "ble_mode")]
+    // conflicts_with makes `--discover --disconnect` report the
+    // conflict instead of suggesting the unsatisfiable --ble.
+    #[arg(long, requires = "ble_mode", conflicts_with = "discover")]
     disconnect: bool,
 
     /// Bluetooth scan duration in seconds, for --discover and --ble
@@ -242,6 +244,20 @@ mod tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    /// clap treats `requires` aimed at a member of an ArgGroup as
+    /// satisfied by any member of that group; pin the flag matrix so
+    /// the single-member-group workaround doesn't regress.
+    #[test]
+    fn test_flag_matrix() {
+        assert!(Args::try_parse_from(["f", "--ble", "--disconnect"]).is_ok());
+        assert!(Args::try_parse_from(["f", "--discover", "--disconnect"]).is_err());
+        assert!(Args::try_parse_from(["f", "--disconnect", "a", "b", "c", "d"]).is_err());
+        assert!(Args::try_parse_from(["f", "--ble", "--scan-time", "5"]).is_ok());
+        assert!(Args::try_parse_from(["f", "--discover", "--scan-time", "5"]).is_ok());
+        assert!(Args::try_parse_from(["f", "--scan-time", "5", "a", "b", "c", "d"]).is_err());
+        assert!(Args::try_parse_from(["f", "--ble", "--discover"]).is_err());
     }
 
     #[test]

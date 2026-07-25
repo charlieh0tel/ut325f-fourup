@@ -10,15 +10,26 @@ repository = "https://github.com/charlieh0tel/ut325f-fourup"
 default = ["serial", "ble", "cli"]
 serial = ["ut325f-rs/serial"]
 ble = ["ut325f-rs/btleplug"]
-cli = ["dep:anyhow", "dep:clap", "serial", "ble"]
+cli = [
+    "dep:anyhow",
+    "dep:clap",
+    "serial",
+    "ble",
+    "tokio/macros",
+    "tokio/rt-multi-thread",
+    "tokio/signal",
+]
 
 [dependencies]
 anyhow = { version = "1.0.104", optional = true }
 clap = { version = "4.6.4", features = ["derive"], optional = true }
 futures = "0.3.33"
 thiserror = "2"
-tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "signal", "time"] }
+tokio = { version = "1.53.1", features = ["time"] }
 ut325f-rs = { version = "1.4.0", default-features = false }
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 
 [[bin]]
 name = "ut325f-fourup"

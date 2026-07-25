@@ -328,10 +328,10 @@ impl<T: Transport> FourUp<T> {
             if skew > self.config.max_skew {
                 self.consecutive_skewed_rows += 1;
                 if self.consecutive_skewed_rows > self.config.max_consecutive_skewed_rows {
-                    return Err(Error::Misaligned {
-                        skew,
-                        rows: self.consecutive_skewed_rows,
-                    });
+                    let rows = self.consecutive_skewed_rows;
+                    // A retrying caller gets the full budget again.
+                    self.consecutive_skewed_rows = 0;
+                    return Err(Error::Misaligned { skew, rows });
                 }
                 continue;
             }
@@ -680,10 +680,14 @@ mod tests {
             vec![
                 now(frame(temps)),
                 (Duration::from_millis(200), Ok(frame(temps))),
+                (Duration::from_millis(200), Ok(frame(temps))),
+                (Duration::from_millis(200), Ok(frame(temps))),
             ]
         };
         let late = |temps| {
             vec![
+                (Duration::from_millis(400), Ok(frame(temps))),
+                (Duration::from_millis(400), Ok(frame(temps))),
                 (Duration::from_millis(400), Ok(frame(temps))),
                 (Duration::from_millis(400), Ok(frame(temps))),
             ]
@@ -699,6 +703,12 @@ mod tests {
         )
         .await;
         let err = fourup.read_row().await.expect_err("misaligned");
+        assert!(
+            matches!(err, Error::Misaligned { rows: 2, .. }),
+            "unexpected error: {err}"
+        );
+        // A retry gets the full budget again, not a leftover counter.
+        let err = fourup.read_row().await.expect_err("still misaligned");
         assert!(
             matches!(err, Error::Misaligned { rows: 2, .. }),
             "unexpected error: {err}"

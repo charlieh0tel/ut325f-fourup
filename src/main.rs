@@ -154,9 +154,16 @@ async fn run<T: Transport>(
         }
         std::process::exit(130);
     }
-    // A read error is the story; a teardown failure matters only on
-    // an otherwise clean exit.
-    result.and(torn_down.map_err(Into::into))
+    match (result, torn_down) {
+        // The read error is the exit error, but a simultaneous
+        // teardown failure (meters possibly still connected) must
+        // not go unreported.
+        (Err(read), Err(teardown)) => {
+            eprintln!("Error: {teardown}");
+            Err(read)
+        }
+        (result, torn_down) => result.and(torn_down),
+    }
 }
 
 async fn read_rows<T: Transport>(fourup: &mut FourUp<T>, relative_timestamps: bool) -> Result<()> {

@@ -71,10 +71,12 @@ disconnects, times out, has no or several active inputs, or if two
 meters use the same input position.  Output ends cleanly when the
 consumer closes the pipe (e.g. `... | head`).
 
-On exit (including Ctrl-C and errors) BLE meters are left connected:
-a connected meter stays awake and the next run finds it without a
-scan.  Pass `--disconnect` to release them instead so they can
-sleep.
+On exit (normal end, meter errors, and Ctrl-C) BLE meters are left
+connected: a connected meter stays awake and the next run finds it
+without a scan.  Pass `--disconnect` to release them instead so they
+can sleep.  Abrupt termination (SIGTERM, kill, a crash) bypasses
+this teardown and may leave connections dangling; `bluetoothctl
+disconnect <addr>` releases them.
 
 ## Library use
 
@@ -86,9 +88,13 @@ BLE discovery) and reads synchronized rows:
 use ut325f_fourup::{Config, FourUp};
 
 let mut fourup = FourUp::open_serial(&ports, Config::default()).await?;
-loop {
+for _ in 0..100 {
     let row = fourup.read_row().await?; // row.timestamp, row.temps_c[0..4]
 }
+// End the session explicitly; drop-time cleanup does not survive
+// runtime shutdown. close() disconnects BLE meters, detach() leaves
+// them connected (awake, instantly reattachable).
+fourup.close().await?;
 ```
 
 `Config` controls the timestamp-skew window, the misaligned-row retry

@@ -38,6 +38,6 @@ jobs:
   # release lives in release.yml and runs solely on tag pushes.
   build:
     needs: check
-    uses: charlieh0tel/deb-workflows/.github/workflows/rust-build-exes.yml@main
+    uses: charlieh0tel/deb-workflows/.github/workflows/rust-build-exes.yml@v1
     with:
       build-deps: libdbus-1-dev

@@ -1,6 +1,8 @@
 [package]
 name = "ut325f-fourup"
 version = "1.5.0"
+# A binary, not a library: nothing here is meant for crates.io.
+publish = false
 edition = "2024"
 description = "Reads four Uni-T UT325F thermocouple meters in lockstep"
 license = "BSD-3-Clause"
